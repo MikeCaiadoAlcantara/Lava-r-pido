@@ -63,13 +63,13 @@ class UserInterfaceSmokeTests(MySQLTestCase):
     def test_initial_setup_saves_custom_admin_for_login(self) -> None:
         setup = AdminSetupDialog(self.database)
         setup.username.setText("proprietaria")
-        setup.password.setText("senha-forte-123")
-        setup.confirm.setText("senha-forte-123")
+        setup.password.setText("senha6")
+        setup.confirm.setText("senha6")
 
         setup.accept()
 
         self.assertEqual(setup.result(), QDialog.DialogCode.Accepted)
-        self.assertTrue(self.database.authenticate("proprietaria", "senha-forte-123"))
+        self.assertTrue(self.database.authenticate("proprietaria", "senha6"))
 
 
 if __name__ == "__main__":

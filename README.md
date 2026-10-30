@@ -20,7 +20,7 @@ python -m app
 
 Antes de abrir o aplicativo, inicie o MySQL pelo painel do XAMPP. Para a conexão com o **servidor MySQL** (não para entrar no aplicativo), o padrão é `127.0.0.1:3306`, usuário `root` sem senha, conforme a configuração comum do XAMPP. O programa cria o banco `lava_rapido_alcantara` e suas tabelas automaticamente. Se o MySQL estiver configurado com outros dados, defina `LAVA_DB_HOST`, `LAVA_DB_PORT`, `LAVA_DB_USER`, `LAVA_DB_PASSWORD` e, opcionalmente, `LAVA_DB_NAME` no ambiente antes de iniciar.
 
-O aplicativo não possui usuário ou senha administrativa pré-definidos. Na primeira execução, ele solicita que você crie o usuário e a senha do administrador. Esses dados ficam salvos no MySQL; a senha é armazenada como hash PBKDF2, nunca em texto puro. Se encontrar a conta administrativa padrão de uma versão anterior, o aplicativo a remove para solicitar um novo cadastro.
+O aplicativo não possui usuário ou senha administrativa pré-definidos. Na primeira execução, ele solicita que você crie o usuário e a senha do administrador; a senha deve ter pelo menos 6 caracteres. Esses dados ficam salvos no MySQL; a senha é armazenada como hash PBKDF2, nunca em texto puro. Se encontrar a conta administrativa padrão de uma versão anterior, o aplicativo a remove para solicitar um novo cadastro.
 
 ## Uso
 

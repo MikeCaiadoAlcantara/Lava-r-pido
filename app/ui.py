@@ -101,7 +101,7 @@ class AdminSetupDialog(QDialog):
         self.confirm = QLineEdit()
         self.confirm.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow("Usuário", self.username)
-        form.addRow("Senha (mínimo 8 caracteres)", self.password)
+        form.addRow("Senha (mínimo 6 caracteres)", self.password)
         form.addRow("Confirme a senha", self.confirm)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -113,8 +113,8 @@ class AdminSetupDialog(QDialog):
         if not self.username.text().strip():
             QMessageBox.warning(self, "Dados necessários", "Informe um nome de usuário.")
             return
-        if len(self.password.text()) < 8:
-            QMessageBox.warning(self, "Senha curta", "A senha precisa ter pelo menos 8 caracteres.")
+        if len(self.password.text()) < 6:
+            QMessageBox.warning(self, "Senha curta", "A senha precisa ter pelo menos 6 caracteres.")
             return
         if self.password.text() != self.confirm.text():
             QMessageBox.warning(self, "Senhas diferentes", "A confirmação não corresponde à senha.")
