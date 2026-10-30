@@ -11,11 +11,19 @@ class DatabaseTests(MySQLTestCase):
             stored_hash = connection.execute("SELECT password_hash FROM administrators").fetchone()[0]
         self.assertNotIn("senha-forte-123", stored_hash)
 
-    def test_default_admin_credentials_are_created_for_new_installation(self) -> None:
-        self.database.ensure_default_admin()
+    def test_new_installation_has_no_default_admin(self) -> None:
+        self.assertFalse(self.database.has_admin())
 
-        self.assertTrue(self.database.authenticate("José", "941225"))
-        self.assertTrue(self.database.has_admin())
+        self.database.create_admin("gerente", "senha-forte-123")
+
+        self.assertTrue(self.database.authenticate("gerente", "senha-forte-123"))
+
+    def test_legacy_default_admin_is_removed(self) -> None:
+        self.database.create_admin("José", "941225")
+
+        self.database.remove_legacy_default_admin()
+
+        self.assertFalse(self.database.has_admin())
 
     def test_daily_payroll_estimate_deducts_absences(self) -> None:
         self.database.add_employee("Ana", "11999990000", 180000)

@@ -18,14 +18,14 @@ python -m pip install -r requirements.txt
 python -m app
 ```
 
-Antes de abrir o aplicativo, inicie o MySQL pelo painel do XAMPP. Por padrão, o programa conecta em `127.0.0.1:3306` usando o usuário `root` sem senha, configuração padrão do XAMPP, e cria o banco `lava_rapido_alcantara` e suas tabelas automaticamente. Se o MySQL estiver configurado com outros dados, defina `LAVA_DB_HOST`, `LAVA_DB_PORT`, `LAVA_DB_USER`, `LAVA_DB_PASSWORD` e, opcionalmente, `LAVA_DB_NAME` no ambiente antes de iniciar.
+Antes de abrir o aplicativo, inicie o MySQL pelo painel do XAMPP. Para a conexão com o **servidor MySQL** (não para entrar no aplicativo), o padrão é `127.0.0.1:3306`, usuário `root` sem senha, conforme a configuração comum do XAMPP. O programa cria o banco `lava_rapido_alcantara` e suas tabelas automaticamente. Se o MySQL estiver configurado com outros dados, defina `LAVA_DB_HOST`, `LAVA_DB_PORT`, `LAVA_DB_USER`, `LAVA_DB_PASSWORD` e, opcionalmente, `LAVA_DB_NAME` no ambiente antes de iniciar.
 
-Na primeira execução, o programa cria o administrador padrão `José`, com senha `941225`. Altere essa senha após o primeiro acesso. A senha é guardada como hash PBKDF2.
+O aplicativo não possui usuário ou senha administrativa pré-definidos. Na primeira execução, ele solicita que você crie o usuário e a senha do administrador. Esses dados ficam salvos no MySQL; a senha é armazenada como hash PBKDF2, nunca em texto puro. Se encontrar a conta administrativa padrão de uma versão anterior, o aplicativo a remove para solicitar um novo cadastro.
 
 ## Uso
 
-- A tela de operação registra serviço, veículo/placa opcional, valor e forma de pagamento, além da contagem diária.
-- A área administrativa exige login e tem resumo por período, despesas, cadastro de funcionários, frequência, cesta básica e bônus.
+- A tela de operação registra no MySQL cada serviço, veículo/placa opcional, valor e observação, com data do movimento para consultas futuras.
+- A área administrativa exige login e tem relatórios semanais, mensais, dos últimos 3 ou 6 meses, do ano atual ou anterior e por intervalo personalizado, além de despesas, cadastro de funcionários, frequência, cesta básica e bônus.
 - O saldo do relatório é faturamento menos despesas lançadas e benefícios registrados. A folha estimada aparece separadamente e não é descontada automaticamente, evitando contar salário duas vezes. Registre em despesas os pagamentos efetivamente realizados.
 - Faltas são contabilizadas apenas quando há um lançamento de frequência para o dia. Dias sem marcação não são presumidos como presença.
 

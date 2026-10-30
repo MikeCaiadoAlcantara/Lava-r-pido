@@ -125,15 +125,14 @@ class Database:
                 (username.strip(), hash_password(password)),
             )
 
-    def ensure_default_admin(self) -> None:
+    def remove_legacy_default_admin(self) -> None:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT 1 FROM administrators WHERE username = ?",
+                "SELECT id, password_hash FROM administrators WHERE username = ?",
                 ("José",),
             ).fetchone()
-        if row is not None:
-            return
-        self.create_admin("José", "941225")
+            if row is not None and verify_password("941225", row["password_hash"]):
+                connection.execute("DELETE FROM administrators WHERE id = ?", (row["id"],))
 
     def authenticate(self, username: str, password: str) -> bool:
         with self.connect() as connection:

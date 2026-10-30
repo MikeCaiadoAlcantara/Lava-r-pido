@@ -77,15 +77,21 @@ class AdminDialog(QDialog):
     def __init__(self, database: Database, parent: QWidget | None = None):
         super().__init__(parent)
         self.database = database
-        self.database.ensure_default_admin()
         self.setWindowTitle("Lava Rápido Alcantara | Administração")
         self.setMinimumSize(940, 690)
         layout = QVBoxLayout(self)
+        header = QHBoxLayout()
         heading = QLabel("Administração")
         heading.setObjectName("pageTitle")
-        layout.addWidget(heading)
+        header.addWidget(heading)
+        header.addStretch()
+        self.report_button = QPushButton("Relatório")
+        self.report_button.clicked.connect(self.open_reports)
+        header.addWidget(self.report_button)
+        layout.addLayout(header)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.build_summary(), "Resumo")
+        self.report_page = self.build_summary()
+        self.tabs.addTab(self.report_page, "Relatórios")
         self.tabs.addTab(self.build_expenses(), "Despesas")
         self.tabs.addTab(self.build_team(), "Equipe e frequência")
         self.tabs.addTab(self.build_benefits(), "Benefícios")
@@ -98,14 +104,27 @@ class AdminDialog(QDialog):
         date_row = QHBoxLayout()
         today = QDate.currentDate()
         month_start = QDate(today.year(), today.month(), 1)
+        self.period_preset = QComboBox()
+        self.period_preset.addItem("Semana atual", "week")
+        self.period_preset.addItem("Mês atual", "month")
+        self.period_preset.addItem("Últimos 3 meses", "three_months")
+        self.period_preset.addItem("Últimos 6 meses", "six_months")
+        self.period_preset.addItem("Ano atual", "year")
+        self.period_preset.addItem("Ano anterior", "previous_year")
+        self.period_preset.addItem("Personalizado", "custom")
+        self.period_preset.setCurrentIndex(self.period_preset.findData("month"))
+        self._updating_period = False
         self.range_start = date_input(month_start)
         self.range_end = date_input(today)
+        self.range_start.dateChanged.connect(self._mark_custom_period)
+        self.range_end.dateChanged.connect(self._mark_custom_period)
+        date_row.addWidget(self.period_preset)
         date_row.addWidget(QLabel("De"))
         date_row.addWidget(self.range_start)
         date_row.addWidget(QLabel("Até"))
         date_row.addWidget(self.range_end)
-        refresh = QPushButton("Atualizar resumo")
-        refresh.clicked.connect(self.refresh_all)
+        refresh = QPushButton("Gerar relatório")
+        refresh.clicked.connect(self.generate_report)
         date_row.addWidget(refresh)
         date_row.addStretch()
         layout.addLayout(date_row)
@@ -137,6 +156,48 @@ class AdminDialog(QDialog):
         self.attendance_table = table(["Funcionário", "Faltas", "Diária"])
         layout.addWidget(self.attendance_table, 1)
         return page
+
+    def open_reports(self) -> None:
+        self.tabs.setCurrentWidget(self.report_page)
+        self.generate_report()
+
+    def _mark_custom_period(self) -> None:
+        if not self._updating_period:
+            self.period_preset.setCurrentIndex(self.period_preset.findData("custom"))
+
+    def generate_report(self) -> None:
+        today = QDate.currentDate()
+        preset = self.period_preset.currentData()
+        start = self.range_start.date()
+        end = self.range_end.date()
+
+        if preset == "week":
+            start = today.addDays(1 - today.dayOfWeek())
+            end = today
+        elif preset == "month":
+            start = QDate(today.year(), today.month(), 1)
+            end = today
+        elif preset == "three_months":
+            start = QDate(today.year(), today.month(), 1).addMonths(-2)
+            end = today
+        elif preset == "six_months":
+            start = QDate(today.year(), today.month(), 1).addMonths(-5)
+            end = today
+        elif preset == "year":
+            start = QDate(today.year(), 1, 1)
+            end = today
+        elif preset == "previous_year":
+            start = QDate(today.year() - 1, 1, 1)
+            end = QDate(today.year() - 1, 12, 31)
+
+        self._updating_period = True
+        self.range_start.setDate(start)
+        self.range_end.setDate(end)
+        self._updating_period = False
+        try:
+            self.refresh_all()
+        except ValueError as error:
+            QMessageBox.warning(self, "Período inválido", str(error))
 
     def build_expenses(self) -> QWidget:
         page = QWidget()

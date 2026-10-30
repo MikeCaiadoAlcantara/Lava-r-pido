@@ -87,8 +87,9 @@ def put_row(widget: QTableWidget, values: list[str], hidden_id: int | None = Non
 
 
 class AdminSetupDialog(QDialog):
-    def __init__(self):
+    def __init__(self, database: Database):
         super().__init__()
+        self.database = database
         self.setWindowTitle("Configurar administrador")
         self.setMinimumWidth(390)
         layout = QVBoxLayout(self)
@@ -118,6 +119,11 @@ class AdminSetupDialog(QDialog):
         if self.password.text() != self.confirm.text():
             QMessageBox.warning(self, "Senhas diferentes", "A confirmação não corresponde à senha.")
             return
+        try:
+            self.database.create_admin(self.username.text(), self.password.text())
+        except Exception:
+            QMessageBox.warning(self, "Erro ao salvar", "Não foi possível salvar o administrador no banco de dados.")
+            return
         super().accept()
 
 
@@ -125,7 +131,6 @@ class LoginDialog(QDialog):
     def __init__(self, database: Database, title: str = "Acesso ao sistema"):
         super().__init__()
         self.database = database
-        self.database.ensure_default_admin()
         self.setWindowTitle(title)
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)

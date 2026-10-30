@@ -36,8 +36,11 @@ def main() -> int:
     application.setStyleSheet(STYLESHEET)
     database = Database()
 
+    database.remove_legacy_default_admin()
     if not database.has_admin():
-        database.ensure_default_admin()
+        setup = AdminSetupDialog(database)
+        if setup.exec() != QDialog.DialogCode.Accepted:
+            return 0
 
     login = LoginDialog(database)
     if login.exec() != QDialog.DialogCode.Accepted:
