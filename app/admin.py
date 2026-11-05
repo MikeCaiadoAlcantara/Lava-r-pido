@@ -1,4 +1,4 @@
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -74,10 +74,12 @@ def put_row(widget: QTableWidget, values: list[str], hidden_id: int | None = Non
 
 
 class AdminDialog(QDialog):
+    business_name_changed = Signal(str)
+
     def __init__(self, database: Database, parent: QWidget | None = None):
         super().__init__(parent)
         self.database = database
-        self.setWindowTitle("Lava Rápido Alcantara | Administração")
+        self.setWindowTitle(f"{database.business_name() or 'Administração'} | Administração")
         self.setMinimumSize(940, 690)
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -95,6 +97,7 @@ class AdminDialog(QDialog):
         self.tabs.addTab(self.build_expenses(), "Despesas")
         self.tabs.addTab(self.build_team(), "Equipe e frequência")
         self.tabs.addTab(self.build_benefits(), "Benefícios")
+        self.tabs.addTab(self.build_business_settings(), "Estabelecimento")
         layout.addWidget(self.tabs)
         self.refresh_all()
 
@@ -136,7 +139,8 @@ class AdminDialog(QDialog):
             "Lavagens simples",
             "Lavagens completas",
             "Faturamento",
-            "Despesas",
+            "Despesas lançadas",
+            "Diárias da equipe",
             "Benefícios",
             "Total de saídas",
             "Saldo registrado",
@@ -156,9 +160,9 @@ class AdminDialog(QDialog):
             metrics.addWidget(panel, index // 3, index % 3)
         layout.addLayout(metrics)
         explanation = QLabel(
-            "O saldo registrado desconta despesas e benefícios do faturamento. "
+            "O saldo registrado desconta despesas lançadas, diárias de presenças marcadas e benefícios. "
             "A folha estimada é exibida separadamente e não entra no saldo para evitar "
-            "descontar novamente pagamentos já lançados em Despesas."
+            "duplicar valores: diárias só contam quando a presença é registrada."
         )
         explanation.setWordWrap(True)
         explanation.setObjectName("muted")
@@ -229,13 +233,32 @@ class AdminDialog(QDialog):
     def build_expenses(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        summary = QGridLayout()
+        self.expense_summary_values: dict[str, QLabel] = {}
+        for index, label in enumerate(
+            ("Despesas lançadas", "Diárias da equipe", "Benefícios", "Total de saídas")
+        ):
+            panel = QFrame()
+            panel.setObjectName("surface")
+            panel_layout = QVBoxLayout(panel)
+            caption = QLabel(label)
+            caption.setObjectName("muted")
+            value = QLabel("—")
+            value.setObjectName("metric")
+            self.expense_summary_values[label] = value
+            panel_layout.addWidget(caption)
+            panel_layout.addWidget(value)
+            summary.addWidget(panel, 0, index)
+        layout.addLayout(summary)
+
         form = QFrame()
         form.setObjectName("surface")
         fields = QGridLayout(form)
         self.expense_date = date_input()
         self.expense_category = QComboBox()
-        self.expense_category.setEditable(True)
-        self.expense_category.addItems(["Produtos", "Diárias", "Manutenção", "Contas", "Outros"])
+        self.expense_category.addItems(
+            ["Diária do pessoal", "Produtos", "Água", "Outros"]
+        )
         self.expense_description = QLineEdit()
         self.expense_description.setPlaceholderText("Ex.: shampoo automotivo")
         self.expense_amount = money_input()
@@ -251,8 +274,22 @@ class AdminDialog(QDialog):
         add.clicked.connect(self.add_expense)
         fields.addWidget(add, 1, 4)
         layout.addWidget(form)
-        self.expense_table = table(["Data", "Categoria", "Descrição", "Valor"])
-        layout.addWidget(self.expense_table, 1)
+        expense_note = QLabel(
+            "As diárias registradas pela frequência são incluídas em “Diária do pessoal”. "
+            "Não lance novamente a mesma diária manualmente."
+        )
+        expense_note.setObjectName("muted")
+        expense_note.setWordWrap(True)
+        layout.addWidget(expense_note)
+
+        self.expense_detail_tabs = QTabWidget()
+        self.expense_table = table(["Data", "Categoria", "Descrição / funcionário", "Valor"])
+        self.expense_detail_tabs.addTab(self.expense_table, "Despesas lançadas")
+        self.expense_category_table = table(["Tipo de despesa", "Lançamentos", "Valor"])
+        self.expense_detail_tabs.addTab(self.expense_category_table, "Despesas por tipo")
+        self.employee_expense_table = table(["Data", "Funcionário", "Diária considerada"])
+        self.expense_detail_tabs.addTab(self.employee_expense_table, "Diárias por presença")
+        layout.addWidget(self.expense_detail_tabs, 1)
         return page
 
     def build_team(self) -> QWidget:
@@ -297,14 +334,39 @@ class AdminDialog(QDialog):
         layout.addWidget(attendance)
         self.employee_table = table(["Funcionário", "Telefone", "Diária"])
         layout.addWidget(self.employee_table, 1)
+        rate_editor = QHBoxLayout()
+        self.employee_rate_date = date_input()
+        self.employee_new_rate = money_input()
+        self.employee_new_rate.setPlaceholderText("Nova diária")
+        change_rate = QPushButton("Alterar diária do selecionado")
+        change_rate.clicked.connect(self.change_employee_rate)
+        rate_editor.addWidget(QLabel("Nova diária válida a partir de"))
+        rate_editor.addWidget(self.employee_rate_date)
+        rate_editor.addWidget(self.employee_new_rate)
+        rate_editor.addWidget(change_rate)
+        layout.addLayout(rate_editor)
         return page
 
     def build_benefits(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        heading = QLabel("Benefícios da equipe")
+        heading.setObjectName("pageTitle")
+        layout.addWidget(heading)
+        info = QLabel(
+            "Registre cada cesta básica ou bônus para um funcionário. A lista abaixo acompanha "
+            "o período selecionado no relatório; benefícios entram no total de saídas."
+        )
+        info.setWordWrap(True)
+        info.setObjectName("muted")
+        layout.addWidget(info)
+
         form = QFrame()
         form.setObjectName("surface")
         fields = QGridLayout(form)
+        fields.setContentsMargins(18, 16, 18, 16)
+        fields.setHorizontalSpacing(14)
+        fields.setVerticalSpacing(8)
         self.benefit_employee = QComboBox()
         self.benefit_period = date_input(QDate.currentDate())
         self.benefit_period.setDisplayFormat("MM/yyyy")
@@ -313,25 +375,94 @@ class AdminDialog(QDialog):
         self.benefit_amount = money_input()
         self.benefit_note = QLineEdit()
         self.benefit_note.setPlaceholderText("Observação (opcional)")
-        fields.addWidget(QLabel("Funcionário"), 0, 0)
-        fields.addWidget(QLabel("Período"), 0, 1)
-        fields.addWidget(QLabel("Tipo"), 0, 2)
-        fields.addWidget(QLabel("Valor (R$)"), 0, 3)
-        fields.addWidget(QLabel("Observação"), 0, 4)
+        for column, label in enumerate(("Funcionário", "Período", "Tipo", "Valor (R$)")):
+            fields.addWidget(QLabel(label), 0, column)
         fields.addWidget(self.benefit_employee, 1, 0)
         fields.addWidget(self.benefit_period, 1, 1)
         fields.addWidget(self.benefit_kind, 1, 2)
         fields.addWidget(self.benefit_amount, 1, 3)
-        fields.addWidget(self.benefit_note, 1, 4)
+        fields.addWidget(QLabel("Observação (opcional)"), 2, 0, 1, 4)
+        fields.addWidget(self.benefit_note, 3, 0, 1, 4)
         add = QPushButton("Registrar benefício")
+        add.setMinimumWidth(180)
         add.clicked.connect(self.add_benefit)
-        fields.addWidget(add, 1, 5)
+        fields.addWidget(add, 4, 0, 1, 4, Qt.AlignmentFlag.AlignRight)
+        fields.setColumnStretch(0, 2)
+        fields.setColumnStretch(1, 1)
+        fields.setColumnStretch(2, 1)
+        fields.setColumnStretch(3, 1)
         layout.addWidget(form)
-        info = QLabel("Os benefícios registrados entram no custo do período. Registre em Despesas pagamentos que não sejam benefícios.")
-        info.setWordWrap(True)
-        info.setObjectName("muted")
-        layout.addWidget(info)
+        self.benefit_table = table(["Período", "Funcionário", "Tipo", "Valor", "Observação"])
+        layout.addWidget(self.benefit_table, 1)
         return page
+
+    def build_business_settings(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        form = QFrame()
+        form.setObjectName("surface")
+        fields = QGridLayout(form)
+        fields.setContentsMargins(18, 16, 18, 16)
+        fields.setHorizontalSpacing(14)
+        fields.setVerticalSpacing(10)
+        details = self.database.business_details()
+        self.business_name_field = QLineEdit(details["business_name"])
+        self.business_name_field.setMaxLength(255)
+        self.business_name_field.setPlaceholderText("Nome do lava-rápido")
+        self.business_cnpj_field = QLineEdit(details["business_cnpj"])
+        self.business_cnpj_field.setPlaceholderText("CNPJ")
+        self.business_phone_field = QLineEdit(details["business_phone"])
+        self.business_phone_field.setPlaceholderText("Telefone")
+        self.business_owner_field = QLineEdit(details["business_owner"])
+        self.business_owner_field.setPlaceholderText("Nome do proprietário")
+        self.business_address_field = QLineEdit(details["business_address"])
+        self.business_address_field.setPlaceholderText("Endereço")
+        save = QPushButton("Salvar dados")
+        save.clicked.connect(self.save_business_details)
+        fields.addWidget(QLabel("Nome do estabelecimento"), 0, 0)
+        fields.addWidget(QLabel("CNPJ"), 0, 1)
+        fields.addWidget(self.business_name_field, 1, 0)
+        fields.addWidget(self.business_cnpj_field, 1, 1)
+        fields.addWidget(QLabel("Telefone"), 2, 0)
+        fields.addWidget(QLabel("Proprietário"), 2, 1)
+        fields.addWidget(self.business_phone_field, 3, 0)
+        fields.addWidget(self.business_owner_field, 3, 1)
+        fields.addWidget(QLabel("Endereço"), 4, 0, 1, 2)
+        fields.addWidget(self.business_address_field, 5, 0, 1, 2)
+        fields.addWidget(save, 6, 0, 1, 2, Qt.AlignmentFlag.AlignRight)
+        fields.setColumnStretch(0, 1)
+        fields.setColumnStretch(1, 1)
+        layout.addWidget(form)
+        layout.addStretch()
+        return page
+
+    def save_business_details(self) -> None:
+        try:
+            self.database.set_business_details(
+                {
+                    "business_name": self.business_name_field.text(),
+                    "business_cnpj": self.business_cnpj_field.text(),
+                    "business_phone": self.business_phone_field.text(),
+                    "business_owner": self.business_owner_field.text(),
+                    "business_address": self.business_address_field.text(),
+                }
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Dados inválidos", str(error))
+            return
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                "Erro ao salvar",
+                f"Não foi possível salvar os dados do estabelecimento: {error}",
+            )
+            return
+        business_name = self.database.business_name()
+        self.setWindowTitle(f"{business_name} | Administração")
+        self.business_name_changed.emit(business_name)
+        QMessageBox.information(
+            self, "Dados salvos", "Os dados do estabelecimento foram atualizados."
+        )
 
     def selected_period(self) -> tuple[str, str]:
         start, end = date_text(self.range_start), date_text(self.range_end)
@@ -346,7 +477,10 @@ class AdminDialog(QDialog):
         self.metric_values["Lavagens simples"].setText(str(report["simple_count"]))
         self.metric_values["Lavagens completas"].setText(str(report["complete_count"]))
         self.metric_values["Faturamento"].setText(money_text(report["revenue_cents"]))
-        self.metric_values["Despesas"].setText(money_text(report["expense_cents"]))
+        self.metric_values["Despesas lançadas"].setText(money_text(report["expense_cents"]))
+        self.metric_values["Diárias da equipe"].setText(
+            money_text(report["employee_daily_cost_cents"])
+        )
         self.metric_values["Benefícios"].setText(money_text(report["benefit_cents"]))
         self.metric_values["Total de saídas"].setText(money_text(report["outflow_cents"]))
         self.metric_values["Saldo registrado"].setText(money_text(report["net_cents"]))
@@ -380,17 +514,20 @@ class AdminDialog(QDialog):
                 ],
             )
         self.benefit_report_table.setRowCount(0)
+        self.benefit_table.setRowCount(0)
         for item in report["benefits"]:
+            benefit_row = [
+                item["period"],
+                item["employee_name"],
+                item["kind"],
+                money_text(item["amount_cents"]),
+                item["note"] or "—",
+            ]
             put_row(
                 self.benefit_report_table,
-                [
-                    item["period"],
-                    item["employee_name"],
-                    item["kind"],
-                    item["note"] or "—",
-                    money_text(item["amount_cents"]),
-                ],
+                [benefit_row[0], benefit_row[1], benefit_row[2], benefit_row[4], benefit_row[3]],
             )
+            put_row(self.benefit_table, benefit_row)
         if report["attendance"]:
             most_names = ", ".join(report["most_absences_names"])
             least_names = ", ".join(report["least_absences_names"])
@@ -405,17 +542,86 @@ class AdminDialog(QDialog):
             name = employee["name"]
             absences = employee["absences"] or 0
             put_row(self.attendance_table, [f"{name} ({absences} falta(s))", str(absences), money_text(employee["monthly_salary_cents"])])
-        self.refresh_expenses()
+        self.refresh_expenses(report)
         self.refresh_employees()
 
-    def refresh_expenses(self) -> None:
+    def refresh_expenses(self, report: dict | None = None) -> None:
         if not hasattr(self, "expense_table"):
             return
-        start, end = self.selected_period()
-        rows = self.database.expenses_between(start, end)
+        if report is None:
+            start, end = self.selected_period()
+            report = self.database.report(start, end)
+        self.expense_summary_values["Despesas lançadas"].setText(
+            money_text(report["expense_cents"])
+        )
+        self.expense_summary_values["Diárias da equipe"].setText(
+            money_text(report["employee_daily_cost_cents"])
+        )
+        self.expense_summary_values["Benefícios"].setText(
+            money_text(report["benefit_cents"])
+        )
+        self.expense_summary_values["Total de saídas"].setText(
+            money_text(report["outflow_cents"])
+        )
         self.expense_table.setRowCount(0)
-        for item in rows:
-            put_row(self.expense_table, [item["expense_day"], item["category"], item["description"], money_text(item["amount_cents"])])
+        category_totals = {
+            "Diária do pessoal": [0, 0],
+            "Produtos": [0, 0],
+            "Água": [0, 0],
+            "Outros": [0, 0],
+        }
+        category_aliases = {
+            "diária do pessoal": "Diária do pessoal",
+            "diarias": "Diária do pessoal",
+            "diária": "Diária do pessoal",
+            "produtos": "Produtos",
+            "água": "Água",
+            "agua": "Água",
+            "outros": "Outros",
+        }
+        for item in report["expenses"]:
+            category = category_aliases.get(item["category"].strip().casefold(), "Outros")
+            category_totals[category][0] += 1
+            category_totals[category][1] += int(item["amount_cents"])
+            put_row(
+                self.expense_table,
+                [
+                    item["expense_day"],
+                    category,
+                    item["description"],
+                    money_text(item["amount_cents"]),
+                ],
+            )
+        for item in report["employee_daily_expenses"]:
+            amount_cents = int(item["amount_cents"])
+            category_totals["Diária do pessoal"][0] += 1
+            category_totals["Diária do pessoal"][1] += amount_cents
+            row = self.expense_table.rowCount()
+            put_row(
+                self.expense_table,
+                [
+                    str(item["attendance_day"])[:10],
+                    "Diária do pessoal",
+                    item["employee_name"],
+                    money_text(amount_cents),
+                ],
+            )
+            self.expense_table.item(row, 2).setToolTip(
+                "Diária calculada automaticamente pela presença registrada."
+            )
+        self.expense_category_table.setRowCount(0)
+        for category, (count, cents) in category_totals.items():
+            put_row(self.expense_category_table, [category, str(count), money_text(cents)])
+        self.employee_expense_table.setRowCount(0)
+        for item in report["employee_daily_expenses"]:
+            put_row(
+                self.employee_expense_table,
+                [
+                    str(item["attendance_day"])[:10],
+                    item["employee_name"],
+                    money_text(item["amount_cents"]),
+                ],
+            )
 
     def refresh_employees(self) -> None:
         employees = self.database.employees()
@@ -462,6 +668,27 @@ class AdminDialog(QDialog):
         self.employee_name.clear()
         self.employee_phone.clear()
         self.employee_salary.clear()
+        self.refresh_all()
+
+    def change_employee_rate(self) -> None:
+        row = self.employee_table.currentRow()
+        if row < 0:
+            QMessageBox.information(
+                self, "Selecione um funcionário", "Selecione o funcionário que terá a diária alterada."
+            )
+            return
+        try:
+            new_rate = parse_money(self.employee_new_rate.text())
+            if new_rate < 0:
+                raise ValueError("A diária não pode ser negativa.")
+            employee_id = self.employee_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            self.database.change_employee_daily_rate(
+                employee_id, new_rate, date_text(self.employee_rate_date)
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Confira a diária", str(error) or "Informe um valor válido.")
+            return
+        self.employee_new_rate.clear()
         self.refresh_all()
 
     def mark_attendance(self) -> None:

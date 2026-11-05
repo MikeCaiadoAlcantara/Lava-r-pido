@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGridLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -90,26 +91,86 @@ class AdminSetupDialog(QDialog):
     def __init__(self, database: Database):
         super().__init__()
         self.database = database
-        self.setWindowTitle("Configurar administrador")
-        self.setMinimumWidth(390)
+        self.pending_employees: list[tuple[str, str, int]] = []
+        self.setWindowTitle("Configurar lava-rápido")
+        self.setMinimumWidth(620)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Crie a conta que protegerá os dados administrativos."))
+        layout.addWidget(QLabel("Cadastre o estabelecimento, a primeira conta administrativa e, se desejar, a equipe."))
         form = QFormLayout()
+        self.business_name = QLineEdit()
         self.username = QLineEdit()
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm = QLineEdit()
         self.confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Nome do lava-rápido", self.business_name)
         form.addRow("Usuário", self.username)
         form.addRow("Senha (mínimo 6 caracteres)", self.password)
         form.addRow("Confirme a senha", self.confirm)
         layout.addLayout(form)
+
+        employee_form = QGridLayout()
+        self.employee_name = QLineEdit()
+        self.employee_phone = QLineEdit()
+        self.employee_daily_rate = money_input()
+        employee_form.addWidget(QLabel("Funcionário inicial (opcional)"), 0, 0, 1, 3)
+        employee_form.addWidget(QLabel("Nome"), 1, 0)
+        employee_form.addWidget(QLabel("Telefone"), 1, 1)
+        employee_form.addWidget(QLabel("Diária (R$)"), 1, 2)
+        employee_form.addWidget(self.employee_name, 2, 0)
+        employee_form.addWidget(self.employee_phone, 2, 1)
+        employee_form.addWidget(self.employee_daily_rate, 2, 2)
+        add_employee = QPushButton("Adicionar funcionário")
+        add_employee.clicked.connect(self.add_pending_employee)
+        employee_form.addWidget(add_employee, 2, 3)
+        employee_form.setColumnStretch(0, 1)
+        employee_form.setColumnStretch(1, 1)
+        layout.addLayout(employee_form)
+        self.initial_employee_table = table(["Funcionário", "Telefone", "Diária"])
+        self.initial_employee_table.setMaximumHeight(150)
+        layout.addWidget(self.initial_employee_table)
+        remove_employee = QPushButton("Remover funcionário selecionado")
+        remove_employee.setObjectName("secondaryButton")
+        remove_employee.clicked.connect(self.remove_pending_employee)
+        layout.addWidget(remove_employee)
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def add_pending_employee(self) -> None:
+        name = self.employee_name.text().strip()
+        if not name or not self.employee_daily_rate.text().strip():
+            QMessageBox.warning(
+                self, "Dados necessários", "Informe o nome do funcionário e o valor da diária."
+            )
+            return
+        try:
+            daily_rate = parse_money(self.employee_daily_rate.text())
+            if daily_rate < 0:
+                raise ValueError("A diária não pode ser negativa.")
+        except ValueError as error:
+            QMessageBox.warning(self, "Confira a diária", str(error) or "Informe um valor válido.")
+            return
+        employee = (name, self.employee_phone.text().strip(), daily_rate)
+        self.pending_employees.append(employee)
+        put_row(self.initial_employee_table, [name, employee[1] or "—", money_text(daily_rate)])
+        self.employee_name.clear()
+        self.employee_phone.clear()
+        self.employee_daily_rate.clear()
+
+    def remove_pending_employee(self) -> None:
+        row = self.initial_employee_table.currentRow()
+        if row < 0:
+            return
+        self.initial_employee_table.removeRow(row)
+        self.pending_employees.pop(row)
+
     def accept(self) -> None:
+        if not self.business_name.text().strip():
+            QMessageBox.warning(self, "Dados necessários", "Informe o nome do lava-rápido.")
+            return
         if not self.username.text().strip():
             QMessageBox.warning(self, "Dados necessários", "Informe um nome de usuário.")
             return
@@ -120,9 +181,22 @@ class AdminSetupDialog(QDialog):
             QMessageBox.warning(self, "Senhas diferentes", "A confirmação não corresponde à senha.")
             return
         try:
-            self.database.create_admin(self.username.text(), self.password.text())
+            self.database.create_initial_setup(
+                self.business_name.text(),
+                self.username.text(),
+                self.password.text(),
+                self.pending_employees,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Dados inválidos", str(error))
+            return
         except Exception:
-            QMessageBox.warning(self, "Erro ao salvar", "Não foi possível salvar o administrador no banco de dados.")
+            QMessageBox.warning(
+                self,
+                "Erro ao salvar",
+                "Não foi possível salvar o administrador no banco de dados. "
+                "Confira se o MySQL está iniciado e tente novamente.",
+            )
             return
         super().accept()
 
@@ -186,6 +260,42 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "Acesso negado", "Usuário ou senha incorretos.")
 
 
+class BusinessNameDialog(QDialog):
+    def __init__(self, database: Database):
+        super().__init__()
+        self.database = database
+        self.setWindowTitle("Nome do estabelecimento")
+        self.setMinimumWidth(380)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Informe o nome do lava-rápido para configurar o aplicativo."))
+        self.business_name = QLineEdit()
+        self.business_name.setMaxLength(255)
+        self.business_name.setText(database.business_name())
+        self.business_name.setPlaceholderText("Nome do lava-rápido")
+        layout.addWidget(self.business_name)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept(self) -> None:
+        try:
+            self.database.set_business_name(self.business_name.text())
+        except ValueError as error:
+            QMessageBox.warning(self, "Nome necessário", str(error))
+            return
+        except Exception:
+            QMessageBox.warning(
+                self,
+                "Erro ao salvar",
+                "Não foi possível salvar o nome no banco de dados. Confira se o MySQL está iniciado.",
+            )
+            return
+        super().accept()
+
+
 class AdminLoginDialog(LoginDialog):
     def __init__(self, database: Database):
         super().__init__(database, "Acesso administrativo", allow_registration=False)
@@ -195,7 +305,8 @@ class MainWindow(QMainWindow):
     def __init__(self, database: Database):
         super().__init__()
         self.database = database
-        self.setWindowTitle("Lava Rápido Alcantara | Operação")
+        business_name = database.business_name()
+        self.setWindowTitle(f"{business_name or 'Operação'} | Operação")
         self.setMinimumSize(900, 640)
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -204,11 +315,11 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         title_group = QVBoxLayout()
-        title = QLabel("Lava Rápido Alcantara")
-        title.setObjectName("pageTitle")
+        self.business_title = QLabel(business_name or "Lava-rápido")
+        self.business_title.setObjectName("pageTitle")
         subtitle = QLabel("Registro de lavagens")
         subtitle.setObjectName("muted")
-        title_group.addWidget(title)
+        title_group.addWidget(self.business_title)
         title_group.addWidget(subtitle)
         header.addLayout(title_group)
         header.addStretch()
@@ -245,6 +356,7 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(QLabel("Serviço"), 0, 1)
         form_layout.addWidget(QLabel("Valor (R$)"), 0, 2)
         form_layout.addWidget(QLabel("Observação"), 0, 3)
+        form_layout.addWidget(QLabel(""), 0, 4)
         form_layout.addWidget(self.vehicle, 1, 0)
         form_layout.addWidget(self.description, 1, 1)
         form_layout.addWidget(self.amount, 1, 2)
@@ -252,9 +364,18 @@ class MainWindow(QMainWindow):
         self.save_service = QPushButton("Registrar lavagem")
         self.save_service.clicked.connect(self.add_service)
         form_layout.addWidget(self.save_service, 1, 4)
+        for column in (0, 1, 3):
+            form_layout.setColumnStretch(column, 1)
         layout.addWidget(form_box)
 
         self.service_table = table(["Veículo / placa", "Serviço", "Valor", "Observação", "Lançado às"])
+        header = self.service_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.service_table, 1)
         footer = QHBoxLayout()
         footer.addWidget(QLabel("Os valores detalhados ficam nesta tela; relatórios financeiros ficam na área administrativa."))
@@ -266,6 +387,10 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self.setCentralWidget(root)
         self.refresh_services()
+
+    def set_business_name(self, business_name: str) -> None:
+        self.business_title.setText(business_name)
+        self.setWindowTitle(f"{business_name} | Operação")
 
     def add_service(self) -> None:
         try:
@@ -317,4 +442,6 @@ class MainWindow(QMainWindow):
     def open_admin(self) -> None:
         login = AdminLoginDialog(self.database)
         if login.exec() == QDialog.DialogCode.Accepted:
-            AdminDialog(self.database, self).exec()
+            admin = AdminDialog(self.database, self)
+            admin.business_name_changed.connect(self.set_business_name)
+            admin.exec()

@@ -29,7 +29,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Lava Rápido Alcantara',
+    name='Sistema Lava Rapido',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

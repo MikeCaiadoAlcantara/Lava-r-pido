@@ -88,6 +88,19 @@ class Database:
                 monthly_salary_cents BIGINT NOT NULL,
                 active TINYINT NOT NULL DEFAULT 1
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            """CREATE TABLE IF NOT EXISTS employee_daily_rates (
+                id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                employee_id INT NOT NULL,
+                daily_rate_cents BIGINT NOT NULL,
+                effective_from DATE NOT NULL,
+                UNIQUE KEY uq_employee_daily_rate_date (employee_id, effective_from),
+                INDEX idx_employee_daily_rate_effective (employee_id, effective_from),
+                CONSTRAINT fk_daily_rate_employee FOREIGN KEY (employee_id) REFERENCES employees(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            """CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
+                setting_value VARCHAR(255) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
             """CREATE TABLE IF NOT EXISTS attendance (
                 id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 employee_id INT NOT NULL,
@@ -113,6 +126,31 @@ class Database:
         with self.connect() as connection:
             for statement in statements:
                 connection.execute(statement)
+            connection.execute(
+                "INSERT IGNORE INTO app_settings(setting_key, setting_value) VALUES (?, ?)",
+                ("business_name", ""),
+            )
+            migration = connection.execute(
+                "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+                ("business_name_default_migration",),
+            ).fetchone()
+            if migration is None:
+                connection.execute(
+                    "UPDATE app_settings SET setting_value = '' "
+                    "WHERE setting_key = ? AND setting_value = ?",
+                    ("business_name", "Lava Rápido Alcantara"),
+                )
+                connection.execute(
+                    "INSERT INTO app_settings(setting_key, setting_value) VALUES (?, ?)",
+                    ("business_name_default_migration", "done"),
+                )
+            connection.execute(
+                "INSERT INTO employee_daily_rates(employee_id, daily_rate_cents, effective_from) "
+                "SELECT e.id, e.monthly_salary_cents, '1000-01-01' FROM employees e "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM employee_daily_rates r WHERE r.employee_id = e.id"
+                ")"
+            )
 
     def has_admin(self) -> bool:
         with self.connect() as connection:
@@ -125,14 +163,88 @@ class Database:
                 (username.strip(), hash_password(password)),
             )
 
-    def remove_legacy_default_admin(self) -> None:
+    def create_initial_setup(
+        self,
+        business_name: str,
+        username: str,
+        password: str,
+        employees: list[tuple[str, str, int]],
+    ) -> None:
+        business_name = business_name.strip()
+        username = username.strip()
+        if not business_name:
+            raise ValueError("Informe o nome do lava-rápido.")
+        if not username:
+            raise ValueError("Informe um nome de usuário.")
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO administrators(username, password_hash) VALUES (?, ?)",
+                (username, hash_password(password)),
+            )
+            connection.execute(
+                "INSERT INTO app_settings(setting_key, setting_value) VALUES (?, ?) "
+                "ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+                ("business_name", business_name),
+            )
+            for name, phone, daily_rate_cents in employees:
+                cursor = connection.execute(
+                    "INSERT INTO employees(name, phone, monthly_salary_cents) VALUES (?, ?, ?)",
+                    (name.strip(), phone.strip(), daily_rate_cents),
+                )
+                employee_id = cursor.cursor.lastrowid
+                connection.execute(
+                    "INSERT INTO employee_daily_rates(employee_id, daily_rate_cents, effective_from) "
+                    "VALUES (?, ?, CURRENT_DATE)",
+                    (employee_id, daily_rate_cents),
+                )
+
+    def business_name(self) -> str:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT id, password_hash FROM administrators WHERE username = ?",
-                ("José",),
+                "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+                ("business_name",),
             ).fetchone()
-            if row is not None and verify_password("941225", row["password_hash"]):
-                connection.execute("DELETE FROM administrators WHERE id = ?", (row["id"],))
+        return row["setting_value"] if row else ""
+
+    def business_details(self) -> dict[str, str]:
+        keys = (
+            "business_name",
+            "business_cnpj",
+            "business_phone",
+            "business_owner",
+            "business_address",
+        )
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT setting_key, setting_value FROM app_settings "
+                "WHERE setting_key IN (?, ?, ?, ?, ?)",
+                keys,
+            ).fetchall()
+        details = {row["setting_key"]: row["setting_value"] for row in rows}
+        return {key: details.get(key, "") for key in keys}
+
+    def set_business_details(self, details: dict[str, str]) -> None:
+        normalized = {
+            "business_name": details.get("business_name", "").strip(),
+            "business_cnpj": details.get("business_cnpj", "").strip(),
+            "business_phone": details.get("business_phone", "").strip(),
+            "business_owner": details.get("business_owner", "").strip(),
+            "business_address": details.get("business_address", "").strip(),
+        }
+        if not normalized["business_name"]:
+            raise ValueError("Informe o nome do lava-rápido.")
+        with self.connect() as connection:
+            for key, value in normalized.items():
+                connection.execute(
+                    "INSERT INTO app_settings(setting_key, setting_value) VALUES (?, ?) "
+                    "ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)",
+                    (key, value),
+                )
+
+    def set_business_name(self, business_name: str) -> None:
+        details = self.business_details()
+        details["business_name"] = business_name
+        self.set_business_details(details)
 
     def authenticate(self, username: str, password: str) -> bool:
         with self.connect() as connection:
@@ -177,18 +289,48 @@ class Database:
                 (start, end),
             ).fetchall()
 
-    def add_employee(self, name: str, phone: str, salary_cents: int) -> None:
+    def add_employee(
+        self, name: str, phone: str, salary_cents: int, effective_from: str | None = None
+    ) -> None:
         with self.connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 "INSERT INTO employees(name, phone, monthly_salary_cents) VALUES (?, ?, ?)",
                 (name.strip(), phone.strip(), salary_cents),
             )
+            connection.execute(
+                "INSERT INTO employee_daily_rates(employee_id, daily_rate_cents, effective_from) "
+                "VALUES (?, ?, COALESCE(?, CURRENT_DATE))",
+                (cursor.cursor.lastrowid, salary_cents, effective_from),
+            )
+
+    def change_employee_daily_rate(
+        self, employee_id: int, daily_rate_cents: int, effective_from: str
+    ) -> None:
+        if daily_rate_cents < 0:
+            raise ValueError("A diária não pode ser negativa.")
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO employee_daily_rates(employee_id, daily_rate_cents, effective_from) "
+                "VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE daily_rate_cents=VALUES(daily_rate_cents)",
+                (employee_id, daily_rate_cents, effective_from),
+            )
+            connection.execute(
+                "UPDATE employees SET monthly_salary_cents = ? "
+                "WHERE id = ? AND ? <= CURRENT_DATE",
+                (daily_rate_cents, employee_id, effective_from),
+            )
 
     def employees(self, active_only: bool = True) -> list[dict[str, Any]]:
-        query = "SELECT id, name, phone, monthly_salary_cents, active FROM employees"
+        query = (
+            "SELECT e.id, e.name, e.phone, "
+            "COALESCE((SELECT r.daily_rate_cents FROM employee_daily_rates r "
+            "WHERE r.employee_id = e.id AND r.effective_from <= CURRENT_DATE "
+            "ORDER BY r.effective_from DESC LIMIT 1), e.monthly_salary_cents) "
+            "AS monthly_salary_cents, e.active FROM employees e"
+        )
         if active_only:
-            query += " WHERE active = 1"
-        query += " ORDER BY LOWER(name)"
+            query += " WHERE e.active = 1"
+        query += " ORDER BY LOWER(e.name)"
         with self.connect() as connection:
             return connection.execute(query).fetchall()
 
@@ -222,6 +364,21 @@ class Database:
                 "WHERE kind != 'Sem bônus' AND period BETWEEN substr(?, 1, 7) AND substr(?, 1, 7)",
                 (start, end),
             ).fetchone()[0]
+            employee_daily_expenses = connection.execute(
+                "SELECT a.attendance_day, e.id AS employee_id, e.name AS employee_name, "
+                "CASE WHEN a.paid_cents > 0 THEN a.paid_cents ELSE COALESCE(("
+                "SELECT r.daily_rate_cents FROM employee_daily_rates r "
+                "WHERE r.employee_id = e.id AND r.effective_from <= a.attendance_day "
+                "ORDER BY r.effective_from DESC LIMIT 1"
+                "), e.monthly_salary_cents) END AS amount_cents "
+                "FROM attendance a JOIN employees e ON e.id = a.employee_id "
+                "WHERE a.absent = 0 AND a.attendance_day BETWEEN ? AND ? "
+                "ORDER BY a.attendance_day DESC, LOWER(e.name)",
+                (start, end),
+            ).fetchall()
+            employee_daily_cost_cents = sum(
+                int(row["amount_cents"]) for row in employee_daily_expenses
+            )
             service_count = connection.execute(
                 "SELECT COUNT(*) FROM services WHERE service_day BETWEEN ? AND ?", (start, end)
             ).fetchone()[0]
@@ -261,7 +418,11 @@ class Database:
                 (start, end),
             ).fetchall()
             attendance = connection.execute(
-                "SELECT e.id, e.name, e.monthly_salary_cents, "
+                "SELECT e.id, e.name, "
+                "COALESCE((SELECT r.daily_rate_cents FROM employee_daily_rates r "
+                "WHERE r.employee_id = e.id AND r.effective_from <= CURRENT_DATE "
+                "ORDER BY r.effective_from DESC LIMIT 1), e.monthly_salary_cents) "
+                "AS monthly_salary_cents, "
                 "SUM(CASE WHEN a.absent = 1 THEN 1 ELSE 0 END) AS absences "
                 "FROM employees e LEFT JOIN attendance a ON a.employee_id=e.id "
                 "AND a.attendance_day BETWEEN ? AND ? WHERE e.active=1 "
@@ -273,12 +434,23 @@ class Database:
             end_date = __import__("datetime").date.fromisoformat(end)
             payroll_estimate = 0
             employees = connection.execute(
-                "SELECT id, name, monthly_salary_cents FROM employees WHERE active = 1 ORDER BY LOWER(name)"
+                "SELECT id, name, monthly_salary_cents FROM employees "
+                "WHERE active = 1 ORDER BY LOWER(name)"
             ).fetchall()
 
             for employee in employees:
                 employee_id = employee["id"]
-                daily_rate = int(employee["monthly_salary_cents"])
+                employee_rates = connection.execute(
+                    "SELECT daily_rate_cents, effective_from FROM employee_daily_rates "
+                    "WHERE employee_id = ? AND effective_from <= ? ORDER BY effective_from",
+                    (employee_id, end),
+                ).fetchall()
+                rate_history = [
+                    (str(row["effective_from"])[:10], int(row["daily_rate_cents"]))
+                    for row in employee_rates
+                    if row["effective_from"] is not None
+                ]
+                rate_history.sort(key=lambda item: item[0])
                 records = {
                     row["attendance_day"]: row
                     for row in connection.execute(
@@ -287,8 +459,16 @@ class Database:
                     ).fetchall()
                 }
                 current_date = start_date
+                rate_index = -1
+                daily_rate = int(employee["monthly_salary_cents"])
                 while current_date <= end_date:
                     day_key = current_date.isoformat()
+                    while (
+                        rate_index + 1 < len(rate_history)
+                        and rate_history[rate_index + 1][0] <= day_key
+                    ):
+                        rate_index += 1
+                        daily_rate = rate_history[rate_index][1]
                     record = records.get(day_key)
                     if record is None:
                         payroll_estimate += daily_rate
@@ -305,9 +485,11 @@ class Database:
             return {
                 "revenue_cents": revenue,
                 "expense_cents": expense_total,
+                "employee_daily_cost_cents": employee_daily_cost_cents,
                 "benefit_cents": benefit_total,
-                "outflow_cents": expense_total + benefit_total,
-                "net_cents": revenue - expense_total - benefit_total,
+                "outflow_cents": expense_total + employee_daily_cost_cents + benefit_total,
+                "net_cents": revenue - expense_total - employee_daily_cost_cents - benefit_total,
+                "employee_daily_expenses": employee_daily_expenses,
                 "service_count": service_count,
                 "simple_count": simple_count,
                 "complete_count": complete_count,
