@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QDoubleValidator
@@ -128,9 +128,15 @@ class AdminSetupDialog(QDialog):
 
 
 class LoginDialog(QDialog):
-    def __init__(self, database: Database, title: str = "Acesso ao sistema"):
+    def __init__(
+        self,
+        database: Database,
+        title: str = "Acesso ao sistema",
+        allow_registration: bool = True,
+    ):
         super().__init__()
         self.database = database
+        self.allow_registration = allow_registration
         self.setWindowTitle(title)
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
@@ -141,10 +147,36 @@ class LoginDialog(QDialog):
         form.addRow("Usuário", self.username)
         form.addRow("Senha", self.password)
         layout.addLayout(form)
+        self.register_button = QPushButton("Cadastrar administrador")
+        self.register_button.clicked.connect(self.register_admin)
+        self.register_button.setVisible(allow_registration)
+        layout.addWidget(self.register_button)
+        self.update_registration_button()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.check_credentials)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def update_registration_button(self) -> None:
+        if self.allow_registration:
+            self.register_button.setEnabled(not self.database.has_admin())
+
+    def register_admin(self) -> None:
+        if not self.allow_registration:
+            return
+        if self.database.has_admin():
+            self.update_registration_button()
+            QMessageBox.information(
+                self,
+                "Cadastro indisponível",
+                "Já existe um administrador cadastrado. Entre com essa conta para acessar o sistema.",
+            )
+            return
+        setup = AdminSetupDialog(self.database)
+        if setup.exec() == QDialog.DialogCode.Accepted:
+            self.username.setText(setup.username.text().strip())
+            self.password.setText(setup.password.text())
+            self.check_credentials()
 
     def check_credentials(self) -> None:
         if self.database.authenticate(self.username.text(), self.password.text()):
@@ -156,7 +188,7 @@ class LoginDialog(QDialog):
 
 class AdminLoginDialog(LoginDialog):
     def __init__(self, database: Database):
-        super().__init__(database, "Acesso administrativo")
+        super().__init__(database, "Acesso administrativo", allow_registration=False)
 
 
 class MainWindow(QMainWindow):
@@ -258,10 +290,16 @@ class MainWindow(QMainWindow):
         rows = self.database.services_for_day(date_text(self.service_date))
         self.service_table.setRowCount(0)
         for item in rows:
+            created_at = item["created_at"]
+            time_text = (
+                created_at.strftime("%H:%M")
+                if isinstance(created_at, datetime)
+                else created_at[11:16]
+            )
             put_row(
                 self.service_table,
                 [item["vehicle"] or "—", item["description"], money_text(item["amount_cents"]),
-                 item["payment_method"] or "—", item["created_at"][11:16]],
+                 item["payment_method"] or "—", time_text],
                 item["id"],
             )
         self.count_label.setText(count_label_text(len(rows)))
@@ -280,5 +318,3 @@ class MainWindow(QMainWindow):
         login = AdminLoginDialog(self.database)
         if login.exec() == QDialog.DialogCode.Accepted:
             AdminDialog(self.database, self).exec()
-
-

@@ -225,6 +225,41 @@ class Database:
             service_count = connection.execute(
                 "SELECT COUNT(*) FROM services WHERE service_day BETWEEN ? AND ?", (start, end)
             ).fetchone()[0]
+            services = connection.execute(
+                "SELECT service_day, vehicle, description, amount_cents "
+                "FROM services WHERE service_day BETWEEN ? AND ? ORDER BY service_day DESC, id DESC",
+                (start, end),
+            ).fetchall()
+            service_breakdown = connection.execute(
+                "SELECT description, COUNT(*) AS service_count, "
+                "COALESCE(SUM(amount_cents), 0) AS revenue_cents "
+                "FROM services WHERE service_day BETWEEN ? AND ? "
+                "GROUP BY description ORDER BY service_count DESC, LOWER(description)",
+                (start, end),
+            ).fetchall()
+            simple_count = connection.execute(
+                "SELECT COUNT(*) FROM services WHERE service_day BETWEEN ? AND ? "
+                "AND LOCATE('simples', LOWER(description)) > 0",
+                (start, end),
+            ).fetchone()[0]
+            complete_count = connection.execute(
+                "SELECT COUNT(*) FROM services WHERE service_day BETWEEN ? AND ? "
+                "AND LOCATE('complet', LOWER(description)) > 0",
+                (start, end),
+            ).fetchone()[0]
+            expenses = connection.execute(
+                "SELECT expense_day, category, description, amount_cents FROM expenses "
+                "WHERE expense_day BETWEEN ? AND ? ORDER BY expense_day DESC, id DESC",
+                (start, end),
+            ).fetchall()
+            benefits = connection.execute(
+                "SELECT b.period, e.name AS employee_name, b.kind, b.note, b.amount_cents "
+                "FROM benefits b JOIN employees e ON e.id = b.employee_id "
+                "WHERE b.kind != 'Sem bônus' "
+                "AND b.period BETWEEN substr(?, 1, 7) AND substr(?, 1, 7) "
+                "ORDER BY b.period DESC, e.name, b.id DESC",
+                (start, end),
+            ).fetchall()
             attendance = connection.execute(
                 "SELECT e.id, e.name, e.monthly_salary_cents, "
                 "SUM(CASE WHEN a.absent = 1 THEN 1 ELSE 0 END) AS absences "
@@ -271,8 +306,15 @@ class Database:
                 "revenue_cents": revenue,
                 "expense_cents": expense_total,
                 "benefit_cents": benefit_total,
+                "outflow_cents": expense_total + benefit_total,
                 "net_cents": revenue - expense_total - benefit_total,
                 "service_count": service_count,
+                "simple_count": simple_count,
+                "complete_count": complete_count,
+                "services": services,
+                "service_breakdown": service_breakdown,
+                "expenses": expenses,
+                "benefits": benefits,
                 "payroll_estimate_cents": payroll_estimate,
                 "attendance": attendance,
                 "most_absences": most_absences,

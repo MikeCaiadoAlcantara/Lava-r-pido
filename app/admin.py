@@ -131,7 +131,17 @@ class AdminDialog(QDialog):
 
         metrics = QGridLayout()
         self.metric_values: dict[str, QLabel] = {}
-        labels = ["Lavagens", "Faturamento", "Despesas + benefícios", "Saldo registrado", "Folha estimada"]
+        labels = [
+            "Carros / serviços",
+            "Lavagens simples",
+            "Lavagens completas",
+            "Faturamento",
+            "Despesas",
+            "Benefícios",
+            "Total de saídas",
+            "Saldo registrado",
+            "Folha estimada",
+        ]
         for index, label in enumerate(labels):
             panel = QFrame()
             panel.setObjectName("surface")
@@ -145,16 +155,33 @@ class AdminDialog(QDialog):
             panel_layout.addWidget(value)
             metrics.addWidget(panel, index // 3, index % 3)
         layout.addLayout(metrics)
-        explanation = QLabel("Saldo registrado = faturamento menos despesas e benefícios. A folha estimada considera a diária do funcionário e desconta faltas do período.")
+        explanation = QLabel(
+            "O saldo registrado desconta despesas e benefícios do faturamento. "
+            "A folha estimada é exibida separadamente e não entra no saldo para evitar "
+            "descontar novamente pagamentos já lançados em Despesas."
+        )
         explanation.setWordWrap(True)
         explanation.setObjectName("muted")
         layout.addWidget(explanation)
-        layout.addWidget(QLabel("Faltas registradas no período"))
+        self.report_detail_tabs = QTabWidget()
+        self.service_type_table = table(["Serviço", "Quantidade", "Entradas"])
+        self.report_detail_tabs.addTab(self.service_type_table, "Serviços por tipo")
+        self.service_detail_table = table(["Data", "Veículo / placa", "Serviço", "Valor"])
+        self.report_detail_tabs.addTab(self.service_detail_table, "Atendimentos")
+        self.expense_report_table = table(["Data", "Categoria", "Descrição", "Valor"])
+        self.report_detail_tabs.addTab(self.expense_report_table, "Despesas")
+        self.benefit_report_table = table(["Período", "Funcionário", "Tipo", "Observação", "Valor"])
+        self.report_detail_tabs.addTab(self.benefit_report_table, "Benefícios")
+        attendance_page = QWidget()
+        attendance_layout = QVBoxLayout(attendance_page)
+        attendance_layout.addWidget(QLabel("Faltas registradas no período"))
         self.absence_leaders = QLabel("Mais faltas: — | Menos faltas: —")
         self.absence_leaders.setObjectName("muted")
-        layout.addWidget(self.absence_leaders)
+        attendance_layout.addWidget(self.absence_leaders)
         self.attendance_table = table(["Funcionário", "Faltas", "Diária"])
-        layout.addWidget(self.attendance_table, 1)
+        attendance_layout.addWidget(self.attendance_table)
+        self.report_detail_tabs.addTab(attendance_page, "Frequência")
+        layout.addWidget(self.report_detail_tabs, 1)
         return page
 
     def open_reports(self) -> None:
@@ -315,11 +342,55 @@ class AdminDialog(QDialog):
     def refresh_all(self) -> None:
         start, end = self.selected_period()
         report = self.database.report(start, end)
-        self.metric_values["Lavagens"].setText(str(report["service_count"]))
+        self.metric_values["Carros / serviços"].setText(str(report["service_count"]))
+        self.metric_values["Lavagens simples"].setText(str(report["simple_count"]))
+        self.metric_values["Lavagens completas"].setText(str(report["complete_count"]))
         self.metric_values["Faturamento"].setText(money_text(report["revenue_cents"]))
-        self.metric_values["Despesas + benefícios"].setText(money_text(report["expense_cents"] + report["benefit_cents"]))
+        self.metric_values["Despesas"].setText(money_text(report["expense_cents"]))
+        self.metric_values["Benefícios"].setText(money_text(report["benefit_cents"]))
+        self.metric_values["Total de saídas"].setText(money_text(report["outflow_cents"]))
         self.metric_values["Saldo registrado"].setText(money_text(report["net_cents"]))
         self.metric_values["Folha estimada"].setText(money_text(report["payroll_estimate_cents"]))
+        self.service_type_table.setRowCount(0)
+        for item in report["service_breakdown"]:
+            put_row(
+                self.service_type_table,
+                [item["description"], str(item["service_count"]), money_text(item["revenue_cents"])],
+            )
+        self.service_detail_table.setRowCount(0)
+        for item in report["services"]:
+            put_row(
+                self.service_detail_table,
+                [
+                    item["service_day"],
+                    item["vehicle"] or "—",
+                    item["description"],
+                    money_text(item["amount_cents"]),
+                ],
+            )
+        self.expense_report_table.setRowCount(0)
+        for item in report["expenses"]:
+            put_row(
+                self.expense_report_table,
+                [
+                    item["expense_day"],
+                    item["category"],
+                    item["description"],
+                    money_text(item["amount_cents"]),
+                ],
+            )
+        self.benefit_report_table.setRowCount(0)
+        for item in report["benefits"]:
+            put_row(
+                self.benefit_report_table,
+                [
+                    item["period"],
+                    item["employee_name"],
+                    item["kind"],
+                    item["note"] or "—",
+                    money_text(item["amount_cents"]),
+                ],
+            )
         if report["attendance"]:
             most_names = ", ".join(report["most_absences_names"])
             least_names = ", ".join(report["least_absences_names"])

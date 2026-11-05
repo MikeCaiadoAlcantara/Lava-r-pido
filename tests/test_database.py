@@ -35,8 +35,8 @@ class DatabaseTests(MySQLTestCase):
         self.assertEqual(report["payroll_estimate_cents"], 180000 * 29)
 
     def test_period_report_totals_services_costs_benefits_and_absences(self) -> None:
-        self.database.add_service("2026-09-10", "ABC-1234", "Lavagem", 5000, "Pix")
-        self.database.add_service("2026-09-12", "", "Higienização", 12500, "Dinheiro")
+        self.database.add_service("2026-09-10", "ABC-1234", "Lavagem completa", 5000, "Pix")
+        self.database.add_service("2026-09-12", "XYZ-9876", "Lavagem simples", 12500, "Dinheiro")
         self.database.add_service("2026-08-31", "", "Fora do período", 9000, "Pix")
         self.database.add_expense("2026-09-11", "Produtos", "Shampoo", 3000)
         self.database.add_employee("Ana", "11999990000", 180000)
@@ -51,7 +51,15 @@ class DatabaseTests(MySQLTestCase):
         self.assertEqual(report["revenue_cents"], 17500)
         self.assertEqual(report["expense_cents"], 3000)
         self.assertEqual(report["benefit_cents"], 25000)
+        self.assertEqual(report["outflow_cents"], 28000)
         self.assertEqual(report["net_cents"], -10500)
+        self.assertEqual(report["simple_count"], 1)
+        self.assertEqual(report["complete_count"], 1)
+        self.assertEqual(len(report["services"]), 2)
+        self.assertEqual(report["services"][0]["vehicle"], "XYZ-9876")
+        self.assertEqual(len(report["service_breakdown"]), 2)
+        self.assertEqual(len(report["expenses"]), 1)
+        self.assertEqual(report["benefits"][0]["employee_name"], "Ana")
         self.assertEqual(report["payroll_estimate_cents"], 180000 * 29)
         self.assertEqual(report["attendance"][0]["absences"], 1)
         self.assertEqual(report["most_absences_names"], ["Ana"])
@@ -68,4 +76,6 @@ class DatabaseTests(MySQLTestCase):
 
 
 if __name__ == "__main__":
+    import unittest
+
     unittest.main()

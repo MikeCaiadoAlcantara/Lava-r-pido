@@ -3,7 +3,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QDialog
 
 from app.database import Database
-from app.ui import AdminSetupDialog, LoginDialog, MainWindow
+from app.ui import LoginDialog, MainWindow
 
 
 STYLESHEET = """
@@ -37,11 +37,6 @@ def main() -> int:
     database = Database()
 
     database.remove_legacy_default_admin()
-    if not database.has_admin():
-        setup = AdminSetupDialog(database)
-        if setup.exec() != QDialog.DialogCode.Accepted:
-            return 0
-
     login = LoginDialog(database)
     if login.exec() != QDialog.DialogCode.Accepted:
         return 0

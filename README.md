@@ -20,12 +20,12 @@ python -m app
 
 Antes de abrir o aplicativo, inicie o MySQL pelo painel do XAMPP. Para a conexão com o **servidor MySQL** (não para entrar no aplicativo), o padrão é `127.0.0.1:3306`, usuário `root` sem senha, conforme a configuração comum do XAMPP. O programa cria o banco `lava_rapido_alcantara` e suas tabelas automaticamente. Se o MySQL estiver configurado com outros dados, defina `LAVA_DB_HOST`, `LAVA_DB_PORT`, `LAVA_DB_USER`, `LAVA_DB_PASSWORD` e, opcionalmente, `LAVA_DB_NAME` no ambiente antes de iniciar.
 
-O aplicativo não possui usuário ou senha administrativa pré-definidos. Na primeira execução, ele solicita que você crie o usuário e a senha do administrador; a senha deve ter pelo menos 6 caracteres. Esses dados ficam salvos no MySQL; a senha é armazenada como hash PBKDF2, nunca em texto puro. Se encontrar a conta administrativa padrão de uma versão anterior, o aplicativo a remove para solicitar um novo cadastro.
+O aplicativo não possui usuário ou senha administrativa pré-definidos. Na tela de login, use **Cadastrar administrador** para criar a primeira conta; depois disso, o cadastro fica desabilitado. A senha deve ter pelo menos 6 caracteres e é salva no MySQL como hash PBKDF2, nunca em texto puro. Se encontrar a conta administrativa padrão de uma versão anterior, o aplicativo a remove para solicitar um novo cadastro.
 
 ## Uso
 
 - A tela de operação registra no MySQL cada serviço, veículo/placa opcional, valor e observação, com data do movimento para consultas futuras.
-- A área administrativa exige login e tem relatórios semanais, mensais, dos últimos 3 ou 6 meses, do ano atual ou anterior e por intervalo personalizado, além de despesas, cadastro de funcionários, frequência, cesta básica e bônus.
+- A área administrativa exige login e tem relatórios semanais, mensais, dos últimos 3 ou 6 meses, do ano atual ou anterior e por intervalo personalizado. Os relatórios mostram a quantidade de lavagens simples, completas e dos outros serviços, cada atendimento com veículo/placa e valor, faturamento, despesas, benefícios, total de saídas e saldo.
 - O saldo do relatório é faturamento menos despesas lançadas e benefícios registrados. A folha estimada aparece separadamente e não é descontada automaticamente, evitando contar salário duas vezes. Registre em despesas os pagamentos efetivamente realizados.
 - Faltas são contabilizadas apenas quando há um lançamento de frequência para o dia. Dias sem marcação não são presumidos como presença.
 
